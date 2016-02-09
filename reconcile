@@ -1,0 +1,192 @@
+#!/usr/bin/env php
+<?php
+
+function err($status, $message)
+{
+    fwrite(STDERR, $message . PHP_EOL);
+    exit($status);
+}
+
+function format_ynab_row(array $ynab_row)
+{
+    return sprintf(
+        '%s %s %s %.2f',
+        $ynab_row['Account'],
+        $ynab_row['Date'],
+        $ynab_row['Payee'],
+        $ynab_row['Amount']
+    );
+}
+
+function format_jpmc_row(array $jpmc_row)
+{
+    return sprintf(
+        '%s %s %.2f',
+        $jpmc_row['Post Date'],
+        preg_replace('/\s+/', ' ', $jpmc_row['Description']),
+        $jpmc_row['Amount']
+    );
+}
+
+// Validate input
+if ($argc < 3) {
+    err(1, 'Usage: reconcile ynab.csv jpmc1.csv ... jpmcN.csv');
+}
+
+$ynab_file = $argv[1];
+if (!is_readable($ynab_file)) {
+    err(2, 'YNAB file cannot be read: ' . $ynab_file);
+}
+
+$jpmc_files = [];
+foreach (range(2, $argc - 1) as $key) {
+    $jpmc_file = $argv[$key];
+    if (!is_readable($jpmc_file)) {
+        err(3, 'JPMC file #' . $key . ' cannot be read: ' . $jpmc_file);
+    }
+    $jpmc_files[] = $jpmc_file;
+}
+
+// Get YNAB data
+$fp = fopen($ynab_file, 'r');
+$ynab_columns = array_map(
+    function($v) {
+        return preg_replace('/[^A-Z ]/i', '', $v);
+    },
+    fgetcsv($fp)
+);
+$ynab_rows = [];
+while ($row = fgetcsv($fp)) {
+    $row = array_combine($ynab_columns, $row);
+    $row['Amount'] = abs(ltrim($row['Inflow'], '$') - ltrim($row['Outflow'], '$'));
+    $ynab_rows[] = $row;
+}
+fclose($fp);
+
+// Get JPMC data
+$jpmc_rows = [];
+foreach ($jpmc_files as $jpmc_file) {
+    $fp = fopen($jpmc_file, 'r');
+    $jpmc_columns = explode(',', fgets($fp));
+    $jpmc_rows[$jpmc_file] = [];
+    while ($jpmc_row = fgetcsv($fp)) {
+        $jpmc_rows[$jpmc_file][] = array_combine($jpmc_columns, $jpmc_row);
+    }
+    fclose($fp);
+}
+
+// Index YNAB data by amount
+$ynab_amounts = [];
+foreach ($ynab_rows as $ynab_row_index => $ynab_row) {
+    $amount = (string) $ynab_row['Amount'];
+    if (!isset($ynab_amounts[$amount])) {
+        $ynab_amounts[$amount] = [];
+    }
+    $ynab_amounts[$amount][$ynab_row_index] = $ynab_row;
+}
+
+// Index JPMC data by amount
+$jpmc_amounts = [];
+foreach ($jpmc_rows as $jpmc_file => $jpmc_file_rows) {
+    foreach ($jpmc_file_rows as $jpmc_row_index => $jpmc_file_row) {
+        $amount = (string) abs($jpmc_file_row['Amount']);
+        if (!isset($jpmc_amounts[$amount])) {
+            $jpmc_amounts[$amount] = [];
+        }
+        if (!isset($jpmc_amounts[$amount][$jpmc_file])) {
+            $jpmc_amounts[$amount][$jpmc_file] = [];
+        }
+        $jpmc_amounts[$amount][$jpmc_file][$jpmc_row_index] = $jpmc_file_row;
+    }
+}
+
+// Find YNAB rows missing from JPMC
+$only_ynab = array_diff_key($ynab_amounts, $jpmc_amounts);
+$output = [];
+foreach ($only_ynab as $amount => $amount_rows) {
+    foreach ($amount_rows as $amount_row_index => $amount_row) {
+        $output[$ynab_row_index] = format_ynab_row($amount_row);
+    }
+}
+if ($output) {
+    ksort($output);
+    echo 'In YNAB, not in JPMC', PHP_EOL, PHP_EOL;
+    foreach ($output as $line_no => $line) {
+        echo sprintf(
+            '%d) %s',
+            $line_no+1,
+            $line
+        ), PHP_EOL;
+    }
+    echo PHP_EOL;
+}
+
+// Find JPMC rows missing from YNAB
+$only_jpmc = array_diff_key($jpmc_amounts, $ynab_amounts);
+$output = [];
+foreach ($only_jpmc as $amount => $count) {
+    foreach ($jpmc_rows as $jpmc_file => $jpmc_file_rows) {
+        foreach ($jpmc_file_rows as $jpmc_row_index => $jpmc_row) {
+            if (abs($jpmc_row['Amount']) == $amount) {
+                if (!isset($output[$jpmc_file])) {
+                    $output[$jpmc_file] = [];
+                }
+                $output[$jpmc_file][$jpmc_row_index] = format_jpmc_row($jpmc_row);
+            }
+        }
+    }
+}
+if ($output) {
+    echo 'In JPMC, not in YNAB', PHP_EOL, PHP_EOL;
+    foreach ($output as $jpmc_file => $jpmc_file_lines) {
+        foreach ($jpmc_file_lines as $line_no => $line) {
+            echo sprintf(
+                '%s %d) %s',
+                $jpmc_file,
+                $line_no,
+                $line
+            ) . PHP_EOL;
+        }
+    }
+    echo PHP_EOL;
+}
+
+$common_amounts = array_intersect(array_keys($jpmc_amounts), array_keys($ynab_amounts));
+$output = [];
+foreach ($common_amounts as $amount) {
+    $ynab_count = count($ynab_amounts[$amount]);
+    $jpmc_count = array_sum(array_map('count', $jpmc_amounts[$amount]));
+    if ($ynab_count == $jpmc_count) {
+        continue;
+    }
+    $output[] = sprintf(
+        'Amount %.2f, YNAB %d, JPMC %d',
+        $amount,
+        $ynab_count,
+        $jpmc_count
+    );
+    foreach ($ynab_amounts[$amount] as $ynab_row_index => $ynab_row) {
+        $output[] = sprintf(
+            'YNAB %d) %s',
+            $ynab_row_index+1,
+            format_ynab_row($ynab_row)
+        );
+    }
+    foreach ($jpmc_amounts[$amount] as $jpmc_file => $jpmc_file_rows) {
+        foreach ($jpmc_file_rows as $jpmc_row_index => $jpmc_row) {
+            $output[] = sprintf(
+                'JPMC %s %d) %s',
+                $jpmc_file,
+                $jpmc_row_index+1,
+                format_jpmc_row($jpmc_row)
+            );
+        }
+    }
+    $output[] = '';
+}
+if ($output) {
+    echo 'Differing numbers of transactions with the same amount', PHP_EOL, PHP_EOL;
+    foreach ($output as $line) {
+        echo $line, PHP_EOL;
+    }
+}

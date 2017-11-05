@@ -1,6 +1,6 @@
 # You Need a Budget / JPMorgan Chase Reconciler
 
-A tool to assist with reconcilation of data between the [You Need a Budget](http://www.youneedabudget.com) software and one or more accounts at [JPMorgan Chase](https://www.chase.com).
+A tool to assist with reconciliation of data between the [You Need a Budget](http://www.youneedabudget.com) software and one or more accounts at [JPMorgan Chase](https://www.chase.com).
 
 **DISCLAIMER: Use at your own risk. I am not liable for anything this software does or anything you do as a result of using it.**
 
@@ -33,7 +33,7 @@ The output is intended to help you by finding transactions that may be missing f
 
 ## Why I Wrote It
 
-YNAB has a [reconcilation](http://classic.youneedabudget.com/support/article/how-to-reconcile) feature, but it leaves a lot of the grunt work of reconciling accounts to be done manually by the user, which I don't consider to be very useful.
+YNAB has a [reconciliation](http://classic.youneedabudget.com/support/article/how-to-reconcile) feature, but it leaves a lot of the grunt work of reconciling accounts to be done manually by the user, which I don't consider to be very useful.
 
 While I believe it's good to give the user the choice of what changes to enter, I think a computer can be helpful in finding what changes may need to be entered.
 
